@@ -28,7 +28,8 @@ import java.util.Map;
 
 final class VulkanFlywheelEngine implements Engine, VisualizationContext, InstancerProvider {
     private final LevelAccessor level;
-    private final Map<InstanceType<?>, Map<Model, VulkanInstancer<?>>> instancers = new IdentityHashMap<>();
+    private final VulkanFlywheelDraws draws = new VulkanFlywheelDraws();
+    private final InstancerGroup instancers = new InstancerGroup();
     private final List<VulkanEmbedding> embeddings = new ArrayList<>();
     private final LongSet lightSections = new LongOpenHashSet();
     private final FlywheelFallbackController fallback = new FlywheelFallbackController();
@@ -79,7 +80,15 @@ final class VulkanFlywheelEngine implements Engine, VisualizationContext, Instan
         if (fallback.applyAtFrameBoundary()) {
             return;
         }
-        prepareFrame();
+        if (!draws.canDraw()) return;
+        instancers.draw(draws, context, renderOrigin, new org.joml.Matrix4f(), new org.joml.Matrix3f());
+        synchronized (embeddings) {
+            for (var embedding : embeddings) {
+                synchronized (embedding.data) {
+                    embedding.instancers.draw(draws, context, renderOrigin, embedding.data.pose(), embedding.data.normal());
+                }
+            }
+        }
     }
 
     @Override
@@ -88,10 +97,11 @@ final class VulkanFlywheelEngine implements Engine, VisualizationContext, Instan
 
     @Override
     public void delete() {
-        instancers.values().forEach(models -> models.values().forEach(VulkanInstancer::close));
-        instancers.clear();
-        embeddings.forEach(VulkanEmbedding::delete);
-        embeddings.clear();
+        instancers.close();
+        draws.close();
+        synchronized (embeddings) {
+            List.copyOf(embeddings).forEach(VulkanEmbedding::delete);
+        }
         lightSections.clear();
     }
 
@@ -103,29 +113,59 @@ final class VulkanFlywheelEngine implements Engine, VisualizationContext, Instan
     @Override
     public VisualEmbedding createEmbedding(Vec3i renderOrigin) {
         VulkanEmbedding embedding = new VulkanEmbedding(renderOrigin);
-        embeddings.add(embedding);
+        synchronized (embeddings) {
+            embeddings.add(embedding);
+        }
         return embedding;
     }
 
     @Override
-    @SuppressWarnings("unchecked")
-    public synchronized <I extends Instance> Instancer<I> instancer(InstanceType<I> type, Model model, int bias) {
-        Map<Model, VulkanInstancer<?>> models = instancers.computeIfAbsent(type, ignored -> new IdentityHashMap<>());
-        return (Instancer<I>) models.computeIfAbsent(model, ignored -> new VulkanInstancer<>(type, model));
+    public <I extends Instance> Instancer<I> instancer(InstanceType<I> type, Model model, int bias) {
+        return instancers.instancer(type, model, bias);
     }
 
     private void prepareFrame() {
-        for (Map<Model, VulkanInstancer<?>> models : instancers.values()) {
-            for (VulkanInstancer<?> instancer : models.values()) {
-                instancer.writeDirtyInstances();
-            }
+        instancers.pack();
+        synchronized (embeddings) {
+            embeddings.forEach(embedding -> embedding.instancers.pack());
+        }
+    }
+
+    private static final class InstancerGroup implements InstancerProvider {
+        private final Map<Integer, Map<InstanceType<?>, Map<Model, VulkanInstancer<?>>>> batches = new java.util.TreeMap<>();
+        private boolean closed;
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public synchronized <I extends Instance> Instancer<I> instancer(InstanceType<I> type, Model model, int bias) {
+            if (closed) throw new IllegalStateException("Flywheel instancer group is closed");
+            return (Instancer<I>) batches.computeIfAbsent(bias, ignored -> new IdentityHashMap<>())
+                    .computeIfAbsent(type, ignored -> new IdentityHashMap<>())
+                    .computeIfAbsent(model, ignored -> new VulkanInstancer<>(type, model));
+        }
+
+        synchronized void pack() {
+            batches.values().forEach(types -> types.values().forEach(models ->
+                    models.values().forEach(VulkanInstancer::writeDirtyInstances)));
+        }
+
+        synchronized void draw(VulkanFlywheelDraws draws, RenderContext context, Vec3i origin, Matrix4fc pose, Matrix3fc normal) {
+            batches.values().forEach(types -> types.forEach((type, models) -> models.forEach((model, instancer) ->
+                    draws.draw(context, origin, pose, normal, type, model, instancer.packedSnapshot()))));
+        }
+
+        synchronized void close() {
+            closed = true;
+            batches.values().forEach(types -> types.values().forEach(models ->
+                    models.values().forEach(VulkanInstancer::close)));
+            batches.clear();
         }
     }
 
     private final class VulkanEmbedding implements VisualEmbedding {
         private final VulkanEmbeddingData data = new VulkanEmbeddingData();
-        private Vec3i origin;
-        private boolean deleted;
+        private final Vec3i origin;
+        private final InstancerGroup instancers = new InstancerGroup();
 
         private VulkanEmbedding(Vec3i origin) {
             this.origin = origin;
@@ -138,12 +178,15 @@ final class VulkanFlywheelEngine implements Engine, VisualizationContext, Instan
 
         @Override
         public void delete() {
-            deleted = true;
+            synchronized (embeddings) {
+                embeddings.remove(this);
+                instancers.close();
+            }
         }
 
         @Override
         public InstancerProvider instancerProvider() {
-            return VulkanFlywheelEngine.this;
+            return instancers;
         }
 
         @Override

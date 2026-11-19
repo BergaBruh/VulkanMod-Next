@@ -268,13 +268,25 @@ public class Drawer {
     }
 
     public void drawIndexed(long vertexBuffer, long vertexOffset, long indexBuffer, long indexOffset, int indexType, int count) {
+        drawIndexed(vertexBuffer, vertexOffset, indexBuffer, indexOffset, indexType, count, 1);
+    }
+
+    public void drawIndexed(long vertexBuffer, long vertexOffset, long indexBuffer, long indexOffset, int indexType,
+                            int count, int instanceCount) {
+        drawIndexed(vertexBuffer, vertexOffset, indexBuffer, indexOffset, indexType, count, instanceCount,
+                VRenderSystem.getColorMask() != 0, VRenderSystem.depthTest && VRenderSystem.depthMask);
+    }
+
+    public void drawIndexed(long vertexBuffer, long vertexOffset, long indexBuffer, long indexOffset, int indexType,
+                            int count, int instanceCount, boolean colorWrite, boolean depthWrite) {
+        if (instanceCount <= 0) return;
         VkCommandBuffer commands = Renderer.getCommandBuffer();
         VUtil.UNSAFE.putLong(pBuffers, vertexBuffer);
         VUtil.UNSAFE.putLong(pOffsets, vertexOffset);
         nvkCmdBindVertexBuffers(commands, 0, 1, pBuffers, pOffsets);
         vkCmdBindIndexBuffer(commands, indexBuffer, indexOffset, indexType);
-        if (count > 0) Renderer.recordRasterWrite();
-        vkCmdDrawIndexed(commands, count, 1, 0, 0, 0);
+        if (count > 0) Renderer.recordRasterWrite(colorWrite, depthWrite);
+        vkCmdDrawIndexed(commands, count, instanceCount, 0, 0, 0);
     }
 
     public void draw(long vertexBuffer, long vertexOffset, int count) {

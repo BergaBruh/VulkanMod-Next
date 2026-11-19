@@ -34,3 +34,6 @@ test-control/
 .codex/
 *.jfr
 hs_err_pid*
+.agent-teams/
+.lwjgl/
+libs/

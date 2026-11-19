@@ -906,9 +906,12 @@ public class Renderer {
 
     public void bindGraphicsPipeline(GraphicsPipeline pipeline) {
         GlFramebuffer.ensureDrawFramebufferRendering();
-        VkCommandBuffer commandBuffer = currentCmdBuffer;
+        bindGraphicsPipeline(pipeline, PipelineState.getCurrentPipelineState(boundRenderPass));
+    }
 
-        PipelineState currentState = PipelineState.getCurrentPipelineState(boundRenderPass);
+    /** Bind an explicit state against the render pass already active on this command buffer. */
+    public void bindGraphicsPipeline(GraphicsPipeline pipeline, PipelineState currentState) {
+        VkCommandBuffer commandBuffer = currentCmdBuffer;
         final long handle = pipeline.getHandle(currentState);
 
         if (boundPipelineHandle != handle) {
@@ -1004,6 +1007,14 @@ public class Renderer {
 
         vkCmdSetLineWidth(commandBuffer, 1.0F);
         INSTANCE.appliedLineWidth = 1.0F;
+    }
+
+    public float getAppliedDepthBiasUnits() {
+        return appliedDepthBiasUnits;
+    }
+
+    public float getAppliedDepthBiasFactor() {
+        return appliedDepthBiasFactor;
     }
 
     public static void setDepthBias(float units, float factor) {
@@ -1130,14 +1141,16 @@ public class Renderer {
 
 
     public static void recordRasterWrite() {
+        recordRasterWrite(VRenderSystem.getColorMask() != 0, VRenderSystem.depthTest && VRenderSystem.depthMask);
+    }
+
+    static void recordRasterWrite(boolean color, boolean depth) {
         Renderer renderer = INSTANCE;
         if (renderer == null || renderer.boundFramebuffer == null) return;
         Framebuffer target = renderer.boundFramebuffer;
-        if (VRenderSystem.getColorMask() != 0 && target.getColorAttachment() != null)
+        if (color && target.getColorAttachment() != null)
             target.getColorAttachment().recordRasterOrigin(rasterRowsBottomUp);
-
-
-        if (VRenderSystem.depthTest && VRenderSystem.depthMask && target.getDepthAttachment() != null)
+        if (depth && target.getDepthAttachment() != null)
             target.getDepthAttachment().recordRasterOrigin(rasterRowsBottomUp);
     }
 
