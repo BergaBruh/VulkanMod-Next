@@ -8,7 +8,7 @@ final class ProgramDrawOrder<S, F, P, M> {
         int owner(S shader);
         long generation(int owner);
         void apply(S shader);
-        void uniforms(S shader, M modelView, M projection);
+        boolean uniforms(S shader, M modelView, M projection);
         P pipeline(S shader, F format);
         boolean resources(S shader, P pipeline);
     }
@@ -25,7 +25,7 @@ final class ProgramDrawOrder<S, F, P, M> {
         if (generation <= 0) return null;
         if (apply) backend.apply(shader);
         if (!current(shader, owner, generation)) return null;
-        backend.uniforms(shader, modelView, projection);
+        if (!backend.uniforms(shader, modelView, projection)) return null;
         if (!current(shader, owner, generation)) return null;
         P pipeline = backend.pipeline(shader, format);
         if (pipeline == null || !current(shader, owner, generation)) return null;

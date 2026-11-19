@@ -54,13 +54,18 @@ public class BufferUploaderM {
             Object activeShader = scope != null && scope.shader() != null ? scope.shader() : RenderSystem.getShader();
             if (activeShader instanceof ShaderInstance shader && VeilShaderProgramAccess.isWrapper(shader)) {
                 GraphicsPipeline owned = VeilProgramDraws.prepare(shader, parameters.format(), true);
-                if (owned == null) return;
-                try {
-                    drawPrepared(renderer, owned, meshData, true);
-                } finally {
-                    renderer.restoreGraphicsPipeline(pipeline);
+                if (owned != null) {
+                    try {
+                        drawPrepared(renderer, owned, meshData, true);
+                    } finally {
+                        renderer.restoreGraphicsPipeline(pipeline);
+                    }
+                    return;
                 }
-                return;
+                // Veil wrapper without a bridgeable pipeline (post-effect programs are not
+                // compilable to SPIR-V): fall through to the standard Vulkan draw below so the
+                // pass still renders, instead of aborting the frame.
+
             }
             if (pipeline == null) return;
             if (pipeline instanceof GraphicsPipeline graphics) {

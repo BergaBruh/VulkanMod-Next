@@ -18,22 +18,23 @@ public final class VeilProgramDraws {
                     return linked == null ? 0 : linked.generation();
                 }
                 @Override public void apply(ShaderInstance shader) { shader.apply(); }
-                @Override public void uniforms(ShaderInstance shader, Matrix4f modelView, Matrix4f projection) {
-                    if (GlProgram.currentProgramId() != VeilShaderProgramAccess.programId(shader)) {
-                        throw new IllegalStateException("Veil draw owner was not bound by its wrapper");
-                    }
-
+                @Override public boolean uniforms(ShaderInstance shader, Matrix4f modelView, Matrix4f projection) {
+                    // A Veil wrapper whose program is not the one currently bound (post-effect
+                    // programs, for instance) is simply not drawable through this bridge: report
+                    // "not ours" and let the caller fall back to the regular Vulkan draw path.
+                    if (GlProgram.currentProgramId() != VeilShaderProgramAccess.programId(shader)) return false;
 
                     if (modelView != null) {
                         var uniform = shader.getUniform("ModelViewMat");
-                        if (uniform == null) throw new IllegalStateException("Veil draw has no ModelViewMat uniform");
+                        if (uniform == null) return false;
                         uniform.set(modelView);
                     }
                     if (projection != null) {
                         var uniform = shader.getUniform("ProjMat");
-                        if (uniform == null) throw new IllegalStateException("Veil draw has no ProjMat uniform");
+                        if (uniform == null) return false;
                         uniform.set(projection);
                     }
+                    return true;
                 }
                 @Override public GraphicsPipeline pipeline(ShaderInstance shader, VertexFormat format) {
                     return ((ShaderMixed) shader).getPipeline(format);
